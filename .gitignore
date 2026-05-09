@@ -1,0 +1,31 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# 仮想環境
+.venv/
+venv/
+env/
+
+# VSCode
+.vscode/
+
+# APIキー・設定ファイル（絶対にコミットしない）
+config.json
+secrets.json
+*.env
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ログ・一時ファイル
+*.log
+*.tmp
