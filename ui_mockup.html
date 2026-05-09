@@ -1,0 +1,202 @@
+﻿<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>insta-poster UIモックアップ</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1a2e; font-family: "Segoe UI", sans-serif; color: #e0e0e0; display: flex; justify-content: center; padding: 40px 20px; }
+  .window { width: 780px; background: #2b2b3b; border-radius: 12px; overflow: hidden; box-shadow: 0 8px 32px #0008; }
+
+  .titlebar { background: #1e1e2e; padding: 12px 20px; font-size: 14px; color: #aaa; display: flex; align-items: center; gap: 8px; }
+  .titlebar span { font-weight: bold; color: #e0e0e0; }
+
+  .tabs { display: flex; background: #1e1e2e; padding: 0 20px; gap: 4px; }
+  .tab { padding: 10px 24px; font-size: 13px; border-radius: 8px 8px 0 0; cursor: pointer; color: #888; }
+  .tab.active { background: #2b2b3b; color: #fff; font-weight: bold; }
+
+  /* メインタブ */
+  .content { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+
+  .dropzone { border: 2px dashed #5566aa; border-radius: 10px; padding: 24px; text-align: center; color: #8899cc; font-size: 13px; background: #22223a; }
+  .dropzone .icon { font-size: 32px; margin-bottom: 6px; }
+  .dropzone .sub { font-size: 11px; margin-top: 4px; color: #556; }
+
+  /* キュー一覧 */
+  .queue-header { display: flex; justify-content: space-between; align-items: center; }
+  .queue-title { font-size: 12px; color: #8899cc; }
+  .queue-actions { display: flex; gap: 8px; }
+  .btn-sm { padding: 6px 14px; border-radius: 6px; border: none; font-size: 12px; font-weight: bold; cursor: pointer; }
+  .btn-process { background: #4455cc; color: #fff; }
+  .btn-clear { background: #3a3a5a; color: #aaa; }
+
+  .queue-list { background: #1e1e2e; border-radius: 10px; overflow: hidden; border: 1px solid #2a2a4a; }
+  .queue-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid #2a2a4a; }
+  .queue-item:last-child { border-bottom: none; }
+  .thumb { width: 52px; height: 52px; border-radius: 6px; background: #333; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 6px; }
+  .item-info { flex: 1; min-width: 0; }
+  .item-name { font-size: 13px; font-weight: bold; color: #ccc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item-caption { font-size: 11px; color: #667; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item-schedule { font-size: 11px; color: #7788aa; margin-top: 3px; }
+  .badge { padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: bold; flex-shrink: 0; }
+  .badge-ok { background: #1a3a1a; color: #4c4; }
+  .badge-ng { background: #3a1a1a; color: #c44; }
+  .badge-pending { background: #2a2a3a; color: #778; }
+  .badge-processing { background: #1a2a3a; color: #48c; }
+  .badge-posted { background: #1a2a2a; color: #4bc; }
+  .item-btns { display: flex; gap: 6px; flex-shrink: 0; }
+  .icon-btn { background: #2a2a4a; border: none; border-radius: 6px; padding: 5px 8px; color: #aaa; cursor: pointer; font-size: 12px; }
+
+  /* スケジュール設定バー */
+  .schedule-bar { background: #1e1e2e; border-radius: 10px; padding: 14px 16px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .schedule-bar label { font-size: 12px; color: #8899cc; white-space: nowrap; }
+  .schedule-bar input { background: #2b2b3b; border: 1px solid #3a3a5a; border-radius: 6px; padding: 6px 10px; color: #ddd; font-size: 12px; width: 170px; }
+  .schedule-bar .interval { font-size: 12px; color: #aaa; white-space: nowrap; }
+  .btn-schedule { padding: 8px 20px; border-radius: 8px; border: none; background: #5566dd; color: #fff; font-size: 13px; font-weight: bold; cursor: pointer; margin-left: auto; }
+  .btn-stop { padding: 8px 20px; border-radius: 8px; border: none; background: #553333; color: #faa; font-size: 13px; font-weight: bold; cursor: pointer; }
+
+  /* 設定タブ */
+  .settings { display: none; padding: 24px; flex-direction: column; gap: 16px; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font-size: 12px; color: #8899cc; }
+  .field input { background: #1e1e2e; border: 1px solid #3a3a5a; border-radius: 8px; padding: 10px 14px; color: #ddd; font-size: 13px; }
+  .field .hint { font-size: 11px; color: #556; }
+  .btn-save { padding: 12px; border-radius: 8px; border: none; background: #5566dd; color: #fff; font-size: 13px; font-weight: bold; cursor: pointer; margin-top: 4px; }
+
+  .statusbar { background: #1e1e2e; padding: 8px 20px; font-size: 11px; color: #557; border-top: 1px solid #2a2a3a; display: flex; justify-content: space-between; }
+  .status-ok { color: #4a8; }
+</style>
+</head>
+<body>
+<div class="window">
+
+  <div class="titlebar">📸 <span>insta-poster</span></div>
+
+  <div class="tabs">
+    <div class="tab active" onclick="showTab('main', this)">メイン</div>
+    <div class="tab" onclick="showTab('settings', this)">⚙ 設定</div>
+  </div>
+
+  <!-- メインタブ -->
+  <div id="main" class="content">
+
+    <!-- ドロップゾーン -->
+    <div class="dropzone">
+      <div class="icon">🖼️</div>
+      複数の画像をまとめてドラッグ＆ドロップ
+      <div class="sub">対応形式：JPG / PNG / WEBP　　複数ファイル同時OK</div>
+    </div>
+
+    <!-- キュー一覧 -->
+    <div class="queue-header">
+      <div class="queue-title">投稿キュー（3枚）</div>
+      <div class="queue-actions">
+        <button class="btn-sm btn-process">✨ 一括処理（補正＋キャプション＋安全チェック）</button>
+        <button class="btn-sm btn-clear">🗑 クリア</button>
+      </div>
+    </div>
+
+    <div class="queue-list">
+
+      <!-- 処理済み・スケジュール済み -->
+      <div class="queue-item">
+        <div class="thumb">🌅</div>
+        <div class="item-info">
+          <div class="item-name">photo_sunset.jpg</div>
+          <div class="item-caption">Beautiful golden hour at the beach. The sky painted in hues of orange...</div>
+          <div class="item-schedule">📅 投稿予定：2026/05/10 10:00</div>
+        </div>
+        <span class="badge badge-ok">✅ 安全</span>
+        <div class="item-btns">
+          <button class="icon-btn">✏️ 編集</button>
+          <button class="icon-btn">🗑</button>
+        </div>
+      </div>
+
+      <!-- 処理済み・スケジュール済み -->
+      <div class="queue-item">
+        <div class="thumb">🌿</div>
+        <div class="item-info">
+          <div class="item-name">photo_garden.jpg</div>
+          <div class="item-caption">春の庭に咲き誇る花々。自然の美しさに心が洗われます。</div>
+          <div class="item-schedule">📅 投稿予定：2026/05/11 10:00</div>
+        </div>
+        <span class="badge badge-ok">✅ 安全</span>
+        <div class="item-btns">
+          <button class="icon-btn">✏️ 編集</button>
+          <button class="icon-btn">🗑</button>
+        </div>
+      </div>
+
+      <!-- NGの例 -->
+      <div class="queue-item">
+        <div class="thumb">⚠️</div>
+        <div class="item-info">
+          <div class="item-name">photo_flagged.jpg</div>
+          <div class="item-caption" style="color:#c44;">安全チェックNG：不適切なコンテンツが含まれている可能性があります</div>
+          <div class="item-schedule" style="color:#555;">投稿スキップ</div>
+        </div>
+        <span class="badge badge-ng">🚫 NG</span>
+        <div class="item-btns">
+          <button class="icon-btn">🗑</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- スケジュール設定 -->
+    <div class="schedule-bar">
+      <label>開始日時</label>
+      <input type="text" value="2026/05/10  10:00" />
+      <span class="interval">📆 以降、1日おきに自動投稿</span>
+      <button class="btn-schedule">▶ スケジュール開始</button>
+      <button class="btn-stop">⏹ 停止</button>
+    </div>
+
+  </div>
+
+  <!-- 設定タブ -->
+  <div id="settings" class="settings">
+    <div class="field">
+      <label>Gemini API キー</label>
+      <input type="password" placeholder="AIza..." />
+      <span class="hint">Google AI Studio で取得。キャプション生成・安全チェックに使用します。</span>
+    </div>
+    <div class="field">
+      <label>Instagram ユーザーID</label>
+      <input type="text" placeholder="17841xxxxxxxxx" />
+      <span class="hint">Instagramビジネスアカウントの数字ID</span>
+    </div>
+    <div class="field">
+      <label>Instagram アクセストークン</label>
+      <input type="password" placeholder="EAAxxxxxxxx..." />
+      <span class="hint">Facebook Graph API で取得できます</span>
+    </div>
+    <div class="field">
+      <label>imgbb API キー</label>
+      <input type="password" placeholder="xxxxxxxxxxxxxxxx" />
+      <span class="hint">imgbb.com の無料APIキー（投稿時の画像一時公開に使用）</span>
+    </div>
+    <button class="btn-save">💾 保存する</button>
+  </div>
+
+  <div class="statusbar">
+    <span>スケジューラー稼働中 ▶</span>
+    <span class="status-ok">次回投稿：2026/05/10 10:00（photo_sunset.jpg）</span>
+  </div>
+
+</div>
+
+<script>
+  function showTab(name, el) {
+    document.getElementById('main').style.display = 'none';
+    document.getElementById('settings').style.display = 'none';
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.getElementById(name).style.display = 'flex';
+    el.classList.add('active');
+  }
+  document.getElementById('main').style.display = 'flex';
+</script>
+</body>
+</html>
