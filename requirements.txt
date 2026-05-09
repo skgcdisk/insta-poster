@@ -1,6 +1,6 @@
 ﻿customtkinter
 pillow
-google-generativeai
+google-genai
 requests
 tkinterdnd2
 apscheduler

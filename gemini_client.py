@@ -1,4 +1,5 @@
-﻿import google.generativeai as genai
+﻿from google import genai
+from google.genai import types
 from PIL import Image
 
 
@@ -8,7 +9,7 @@ class GeminiClient:
     2つの機能を1クラスにまとめているのは、どちらも同じモデル・同じAPIキーを使うため。
     """
 
-    MODEL = "gemini-1.5-flash"
+    MODEL = "gemini-2.0-flash"
 
     # 安全チェック用プロンプト
     # "OK" または "NG:理由" という短い形式で返答させることで、パースを簡単にしている
@@ -26,8 +27,7 @@ class GeminiClient:
     )
 
     def __init__(self, api_key: str):
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel(self.MODEL)
+        self.client = genai.Client(api_key=api_key)
 
     def check_safety(self, image_path: str) -> tuple[bool, str]:
         """
@@ -37,7 +37,10 @@ class GeminiClient:
             (is_safe, reason): is_safe=True なら安全、False なら reason に理由が入る
         """
         img = Image.open(image_path)
-        response = self.model.generate_content([self.SAFETY_PROMPT, img])
+        response = self.client.models.generate_content(
+            model=self.MODEL,
+            contents=[self.SAFETY_PROMPT, img],
+        )
         text = response.text.strip()
 
         if text.upper().startswith("OK"):
@@ -55,5 +58,8 @@ class GeminiClient:
             キャプション文字列（ハッシュタグ含む）
         """
         img = Image.open(image_path)
-        response = self.model.generate_content([self.CAPTION_PROMPT, img])
+        response = self.client.models.generate_content(
+            model=self.MODEL,
+            contents=[self.CAPTION_PROMPT, img],
+        )
         return response.text.strip()

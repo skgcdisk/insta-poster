@@ -3,7 +3,8 @@ import threading
 from datetime import datetime, timedelta
 
 import customtkinter as ctk
-from tkinterdnd2 import TkinterDnD, DND_FILES
+import tkinterdnd2
+from tkinterdnd2 import DND_FILES
 from PIL import Image
 
 from config_manager import ConfigManager
@@ -13,12 +14,14 @@ from queue_manager import QueueManager
 from poster import get_poster
 
 
-class App(ctk.CTk, TkinterDnD.Tk):
+class App(ctk.CTk):
     """
     メインアプリケーションウィンドウ。
 
-    CustomTkinter（ダークUI）と tkinterdnd2（ドラッグ&ドロップ）を
-    多重継承で組み合わせる。MRO の都合上、ctk.CTk を先に書く必要がある。
+    CustomTkinter（ダークUI）をベースにしつつ、tkdnd Tcl パッケージを
+    手動でロードしてドラッグ&ドロップを有効化する。
+    tkinterdnd2 は import 時に tkinter.BaseWidget へ DnD メソッドを注入するため、
+    多重継承は不要で `self.tk.call('package', 'require', 'tkdnd')` だけで動作する。
     """
 
     WINDOW_TITLE = "insta-poster"
@@ -39,6 +42,23 @@ class App(ctk.CTk, TkinterDnD.Tk):
         super().__init__()
         self.title(self.WINDOW_TITLE)
         self.geometry(self.WINDOW_SIZE)
+
+        # tkinterdnd2 が同梱する tkdnd ライブラリのパスを Tcl の auto_path に追加してからロードする。
+        # ctk.CTk は TkinterDnD.Tk を経由しないためこの手順が必要。
+        # sys.maxsize で 64bit/32bit を判定して正しいサブフォルダを選ぶ。
+        import sys, platform
+        _base = os.path.join(os.path.dirname(tkinterdnd2.__file__), 'tkdnd')
+        _is64 = sys.maxsize > 2**32
+        _sys  = platform.system()
+        if _sys == 'Windows':
+            _sub = 'win-x64' if _is64 else 'win-x86'
+        elif _sys == 'Darwin':
+            _sub = 'osx-arm64' if platform.machine() == 'arm64' else 'osx-x64'
+        else:
+            _sub = 'linux-arm64' if platform.machine() == 'aarch64' else 'linux-x64'
+        tkdnd_lib = os.path.join(_base, _sub)
+        self.tk.eval(f'lappend auto_path {{{tkdnd_lib}}}')
+        self.tk.call('package', 'require', 'tkdnd')
 
         # コア部品の初期化
         self.config_mgr      = ConfigManager()
