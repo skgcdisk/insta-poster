@@ -1,4 +1,5 @@
 ﻿import os
+import time
 import threading
 from datetime import datetime, timedelta
 
@@ -12,6 +13,7 @@ from image_processor import ImageProcessor
 from gemini_client import GeminiClient
 from queue_manager import QueueManager
 from poster import get_poster
+from poster.base import PosterBase
 
 
 class App(ctk.CTk):
@@ -64,8 +66,8 @@ class App(ctk.CTk):
         self.config_mgr      = ConfigManager()
         self.queue_mgr       = QueueManager()
         self.image_processor = ImageProcessor()
-        self.gemini          = None   # Gemini API キー設定後に初期化
-        self.poster          = None   # 各種 API キー設定後に初期化
+        self.gemini: GeminiClient | None = None   # Gemini API キー設定後に初期化
+        self.poster: PosterBase | None  = None   # 各種 API キー設定後に初期化
 
         self._init_clients()
         self._build_ui()
@@ -126,8 +128,8 @@ class App(ctk.CTk):
         )
         self.drop_zone.pack(fill="x", pady=(0, 12))
         # tkinterdnd2 によるドロップイベントを登録
-        self.drop_zone.drop_target_register(DND_FILES)
-        self.drop_zone.dnd_bind("<<Drop>>", self._on_drop)
+        self.drop_zone.drop_target_register(DND_FILES)  # type: ignore[attr-defined]
+        self.drop_zone.dnd_bind("<<Drop>>", self._on_drop)  # type: ignore[attr-defined]
 
         # ── キュー操作ボタン行 ──
         btn_row = ctk.CTkFrame(parent, fg_color="transparent")
@@ -289,21 +291,19 @@ class App(ctk.CTk):
             self.after(0, self._refresh_queue_list)
 
             try:
-                # Step 1: 安全チェック
-                is_safe, reason = self.gemini.check_safety(job["original_path"])
+                # Step 1: 安全チェック＋キャプション生成を1回のAPIで実行（無料枠の節約）
+                is_safe, ng_reason, caption = self.gemini.analyze_image(job["original_path"])
                 if not is_safe:
-                    self.queue_mgr.update(job["id"], status="ng", ng_reason=reason)
+                    self.queue_mgr.update(job["id"], status="ng", ng_reason=ng_reason)
                     continue
 
                 # Step 2: 画像補正
                 corrected_path = self.image_processor.auto_correct(job["original_path"])
-                self.queue_mgr.update(job["id"], corrected_path=corrected_path)
-
-                # Step 3: キャプション生成
-                caption = self.gemini.generate_caption(corrected_path)
-                self.queue_mgr.update(job["id"], caption=caption, status="ready")
+                self.queue_mgr.update(job["id"], corrected_path=corrected_path, caption=caption, status="ready")
 
             except Exception as e:
+                import traceback
+                traceback.print_exc()   # ターミナルにスタックトレースを表示
                 self.queue_mgr.update(job["id"], status="error", error_message=str(e))
 
             self.after(0, self._refresh_queue_list)
@@ -429,7 +429,7 @@ class App(ctk.CTk):
             font=("", 12, "bold"), anchor="w",
         ).pack(fill="x")
 
-        sub_text = job.get("ng_reason") or job.get("caption") or "─"
+        sub_text = job.get("ng_reason") or job.get("error_message") or job.get("caption") or "─"
         ctk.CTkLabel(
             info, text=sub_text[:80],
             font=("", 10), text_color="gray", anchor="w",

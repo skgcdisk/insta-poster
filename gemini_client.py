@@ -1,65 +1,83 @@
-﻿from google import genai
-from google.genai import types
+from google import genai
 from PIL import Image
 
 
 class GeminiClient:
     """
     Gemini API を使って画像の安全チェックとキャプション生成を行うクラス。
-    2つの機能を1クラスにまとめているのは、どちらも同じモデル・同じAPIキーを使うため。
+
+    API 呼び出し回数を節約するため、安全チェックとキャプション生成を
+    1回のリクエストにまとめて実行する（analyze_image メソッド）。
     """
 
-    MODEL = "gemini-2.0-flash"
+    # gemini-2.5-flash：2025年時点の最新標準モデル
+    MODEL = "gemini-2.5-flash"
 
-    # 安全チェック用プロンプト
-    # "OK" または "NG:理由" という短い形式で返答させることで、パースを簡単にしている
-    SAFETY_PROMPT = (
-        "この画像を確認してください。"
-        "公序良俗に反する内容（暴力・性的・差別的・危険物・その他不適切なもの）が含まれていますか？"
-        "含まれていれば「NG:理由を一言で」、問題なければ「OK」とだけ答えてください。"
-    )
-
-    # キャプション生成用プロンプト
-    CAPTION_PROMPT = (
+    # 安全チェック＋キャプション生成を1回のAPIで行うプロンプト
+    # JSONライクな形式で返答させることでパースしやすくしている
+    COMBINED_PROMPT = (
+        "この画像について2つのことを確認してください。\n\n"
+        "【安全チェック】\n"
+        "公序良俗に反する内容（暴力・性的・差別的・危険物・その他不適切なもの）が含まれていますか？\n\n"
+        "【キャプション生成】\n"
         "この画像に合うInstagramの投稿キャプションを日本語で作成してください。"
-        "絵文字を適度に使い、ハッシュタグを5〜8個含めてください。"
-        "キャプション本文のみ出力し、説明や前置きは不要です。"
+        "絵文字を適度に使い、ハッシュタグを5〜8個含めてください。\n\n"
+        "以下の形式で答えてください（他の文章は不要です）：\n"
+        "SAFETY: OK\n"
+        "CAPTION: （キャプション本文）\n\n"
+        "もし不適切な内容が含まれていれば：\n"
+        "SAFETY: NG:理由を一言で\n"
+        "CAPTION: なし"
     )
 
     def __init__(self, api_key: str):
         self.client = genai.Client(api_key=api_key)
 
-    def check_safety(self, image_path: str) -> tuple[bool, str]:
+    def analyze_image(self, image_path: str) -> tuple[bool, str, str]:
         """
-        画像が投稿に適切かどうかを Gemini で判定する。
+        安全チェックとキャプション生成を1回のAPI呼び出しでまとめて実行する。
+        API 呼び出し回数を半減できるため、無料枠の節約になる。
 
         Returns:
-            (is_safe, reason): is_safe=True なら安全、False なら reason に理由が入る
+            (is_safe, ng_reason, caption)
+            - is_safe  : True なら安全、False なら NG
+            - ng_reason: NG の場合の理由（安全なら空文字）
+            - caption  : 生成されたキャプション（NG なら空文字）
         """
         img = Image.open(image_path)
         response = self.client.models.generate_content(
             model=self.MODEL,
-            contents=[self.SAFETY_PROMPT, img],
+            contents=[self.COMBINED_PROMPT, img],
         )
         text = response.text.strip()
 
-        if text.upper().startswith("OK"):
-            return True, ""
+        # レスポンスを行ごとに解析する
+        is_safe = True
+        ng_reason = ""
+        caption = ""
 
-        # "NG:理由" の形式から理由を取り出す
-        reason = text.split(":", 1)[-1].strip() if ":" in text else text
-        return False, reason
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("SAFETY:"):
+                safety_val = line[len("SAFETY:"):].strip()
+                if safety_val.upper().startswith("NG"):
+                    is_safe = False
+                    ng_reason = safety_val.split(":", 1)[-1].strip() if ":" in safety_val else safety_val
+            elif line.startswith("CAPTION:"):
+                caption_val = line[len("CAPTION:"):].strip()
+                if caption_val != "なし":
+                    caption = caption_val
+
+        return is_safe, ng_reason, caption
+
+    # ── 個別メソッド（後方互換・デバッグ用に残す） ─────────────────────
+
+    def check_safety(self, image_path: str) -> tuple[bool, str]:
+        """画像の安全チェックのみを行う（analyze_image の利用を推奨）。"""
+        is_safe, ng_reason, _ = self.analyze_image(image_path)
+        return is_safe, ng_reason
 
     def generate_caption(self, image_path: str) -> str:
-        """
-        画像から Instagram 用キャプションを生成する。
-
-        Returns:
-            キャプション文字列（ハッシュタグ含む）
-        """
-        img = Image.open(image_path)
-        response = self.client.models.generate_content(
-            model=self.MODEL,
-            contents=[self.CAPTION_PROMPT, img],
-        )
-        return response.text.strip()
+        """キャプション生成のみを行う（analyze_image の利用を推奨）。"""
+        _, _, caption = self.analyze_image(image_path)
+        return caption
