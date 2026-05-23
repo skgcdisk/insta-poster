@@ -40,3 +40,6 @@ processed/
 !build.spec
 dist/
 build/
+
+# 間違えてideaで開いたとき
+.idea/
