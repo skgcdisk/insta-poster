@@ -22,8 +22,9 @@ class ConfigManager:
         "posting_mode": "local",
         "server_url": "",
         "server_api_key": "",
-        # 空文字のときは GeminiClient のデフォルトプロンプトを使用する
-        "combined_prompt": "",
+        # キャプション生成の指示文（空文字のときは GeminiClient のデフォルトを使用）
+        # 安全チェックの指示は GeminiClient 内で固定されており、ここでは変更できない。
+        "caption_prompt": "",
     }
 
     def __init__(self):

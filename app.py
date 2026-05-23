@@ -235,24 +235,42 @@ class App(ctk.CTk):
 
         self._on_mode_change()  # 初期表示切替
 
-        # ── AI プロンプト編集 ──
+        # ── キャプション生成プロンプト編集 ──
         prompt_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         prompt_frame.pack(fill="x", pady=(16, 0))
         ctk.CTkLabel(
             prompt_frame,
-            text="AI 分析プロンプト（安全チェック＋キャプション生成）",
+            text="キャプション生成の指示文",
             font=("", 12, "bold"),
         ).pack(anchor="w")
         ctk.CTkLabel(
             prompt_frame,
-            text="空欄のままにするとデフォルトのプロンプトが使用されます。\n"
-                 "「SAFETY: OK / NG:理由」「CAPTION: 本文」の形式で返答するよう記述してください。",
+            text="AI にキャプションをどう書いてほしいかを日本語で指示します。\n"
+                 "安全チェックの設定はここでは変更できません（内部で固定されています）。\n"
+                 "空欄のままにするとデフォルトの指示が使われます。",
             font=("", 10), text_color="gray",
         ).pack(anchor="w", pady=(2, 4))
-        self.prompt_textbox = ctk.CTkTextbox(prompt_frame, height=160, width=480, font=("", 11))
+
+        # 書き方の例を折りたたみラベルとして表示
+        example_text = (
+            "【書き方の例】\n"
+            "この画像に合うInstagramキャプションを日本語で書いてください。\n"
+            "・カジュアルで親しみやすいトーンにする\n"
+            "・絵文字を3〜5個使う\n"
+            "・ハッシュタグを5個つける（日本語と英語を混ぜる）\n"
+            "・最後に「いいねやフォローよろしくお願いします！」を入れる"
+        )
+        ctk.CTkLabel(
+            prompt_frame, text=example_text,
+            font=("", 10), text_color="#556677",
+            justify="left", anchor="w",
+            fg_color="#1a1a2a", corner_radius=6,
+        ).pack(fill="x", pady=(0, 6), ipady=6, ipadx=8)
+
+        self.prompt_textbox = ctk.CTkTextbox(prompt_frame, height=140, width=480, font=("", 11))
         self.prompt_textbox.pack(anchor="w")
         # 保存済みのカスタムプロンプトがあれば読み込む
-        saved_prompt = self.config_mgr.get("combined_prompt")
+        saved_prompt = self.config_mgr.get("caption_prompt")
         if saved_prompt:
             self.prompt_textbox.insert("0.0", saved_prompt)
 
@@ -328,8 +346,8 @@ class App(ctk.CTk):
         UI の更新は after() でメインスレッドに委譲する。
         """
         total = len(jobs)
-        # 設定タブのカスタムプロンプトを取得（空なら None → GeminiClient のデフォルトを使用）
-        custom_prompt = self.config_mgr.get("combined_prompt").strip() or None
+        # 設定タブのキャプション指示文を取得（空なら None → GeminiClient のデフォルトを使用）
+        custom_prompt = self.config_mgr.get("caption_prompt").strip() or None
 
         for index, job in enumerate(jobs):
             # プログレスバーを現在の進捗に更新する
@@ -341,7 +359,7 @@ class App(ctk.CTk):
             try:
                 # Step 1: 安全チェック＋キャプション生成を1回の API で実行（無料枠の節約）
                 is_safe, ng_reason, caption = self.gemini.analyze_image(
-                    job["original_path"], custom_prompt=custom_prompt
+                    job["original_path"], custom_caption_prompt=custom_prompt
                 )
                 if not is_safe:
                     self.queue_mgr.update(job["id"], status="ng", ng_reason=ng_reason)
@@ -465,9 +483,9 @@ class App(ctk.CTk):
         for key, entry in self.entries.items():
             self.config_mgr.set(key, entry.get().strip())
         self.config_mgr.set("posting_mode", self.mode_var.get())
-        # プロンプトテキストボックスの内容（末尾の余分な改行を除去して保存）
+        # キャプション指示文（末尾の余分な改行を除去して保存）
         prompt = self.prompt_textbox.get("0.0", "end").strip()
-        self.config_mgr.set("combined_prompt", prompt)
+        self.config_mgr.set("caption_prompt", prompt)
         self.config_mgr.save()
         self._init_clients()
         self._set_status("✅ 設定を保存しました")

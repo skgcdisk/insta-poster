@@ -1,5 +1,5 @@
-﻿import os
-from PIL import Image, ImageEnhance
+import os
+from PIL import Image, ImageEnhance, ImageOps
 
 # 補正後の画像を保存するフォルダ（アプリ起動ディレクトリ直下に自動作成）
 PROCESSED_DIR = "processed"
@@ -29,6 +29,11 @@ class ImageProcessor:
             補正後の画像ファイルパス
         """
         img = Image.open(original_path)
+
+        # スマホで撮影した縦長写真などは EXIF に回転情報が記録されている。
+        # exif_transpose() を適用しないと Pillow が向きを無視して保存し、
+        # 開いたときに90度回転して見える問題が起きる。
+        img = ImageOps.exif_transpose(img)
 
         # 明るさ → コントラスト → 彩度 の順に補正する
         img = ImageEnhance.Brightness(img).enhance(self.BRIGHTNESS_FACTOR)
