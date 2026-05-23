@@ -48,6 +48,12 @@ class Scheduler:
         """
         指定日時に execute_post(job_id) を実行するジョブを登録する。
         同じ job_id が既に登録済みの場合は上書きする。
+
+        misfire_grace_time=30 の意味:
+            予定時刻から 30 秒以内なら遅れても実行する（通常の遅延を吸収）。
+            30 秒を超えた場合は APScheduler が自動スキップする。
+            アプリ停止中に時刻が過ぎたジョブは LocalPoster._expire_past_jobs() が
+            起動直後に "expired" へ変更するため、ここでは実行されない。
         """
         self.scheduler.add_job(
             execute_post,           # モジュールレベル関数 → pickle 可能
@@ -56,6 +62,7 @@ class Scheduler:
             args=[job_id],
             id=job_id,
             replace_existing=True,
+            misfire_grace_time=30,  # 30秒超の遅延は実行しない
         )
 
     def remove_job(self, job_id: str):

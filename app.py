@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import customtkinter as ctk
 import tkinterdnd2
 from tkinterdnd2 import DND_FILES
-from PIL import Image
+from PIL import Image, ImageOps
 
 from config_manager import ConfigManager
 from image_processor import ImageProcessor
@@ -25,20 +25,21 @@ class App(ctk.CTk):
     多重継承は不要で `self.tk.call('package', 'require', 'tkdnd')` だけで動作する。
     """
 
-    WINDOW_TITLE    = "insta-poster"
-    WINDOW_SIZE     = "880x780"
+    WINDOW_TITLE     = "insta-poster"
+    WINDOW_SIZE      = "880x780"
     # スケジュール済みジョブの状態変化を確認するポーリング間隔（ミリ秒）
     POLL_INTERVAL_MS = 30_000
 
     # キューアイテムのステータスに対応する（表示ラベル, 背景色, 文字色）
     STATUS_BADGE = {
-        "pending":    ("待機中",      "#2a2a3a", "#778899"),
-        "processing": ("処理中...",   "#1a2a3a", "#4488cc"),
-        "ready":      ("処理済み",    "#1a3a1a", "#44cc44"),
-        "ng":         ("🚫 NG",       "#3a1a1a", "#cc4444"),
-        "scheduled":  ("📅 予約済み", "#1a2a4a", "#6688ff"),
-        "posted":     ("✅ 投稿済み", "#1a2a2a", "#44bbcc"),
-        "error":      ("❌ エラー",   "#3a1a1a", "#cc4444"),
+        "pending":    ("待機中",        "#2a2a3a", "#778899"),
+        "processing": ("処理中...",     "#1a2a3a", "#4488cc"),
+        "ready":      ("処理済み",      "#1a3a1a", "#44cc44"),
+        "ng":         ("🚫 NG",         "#3a1a1a", "#cc4444"),
+        "scheduled":  ("📅 予約済み",   "#1a2a4a", "#6688ff"),
+        "posted":     ("✅ 投稿済み",   "#1a2a2a", "#44bbcc"),
+        "error":      ("❌ エラー",     "#3a1a1a", "#cc4444"),
+        "expired":    ("⌛ 日時経過",   "#2a2a1a", "#aaaa44"),  # アプリ停止中に時刻が過ぎた
     }
 
     def __init__(self):
@@ -172,23 +173,33 @@ class App(ctk.CTk):
         sched = ctk.CTkFrame(parent, fg_color="#1e1e2e", corner_radius=10)
         sched.pack(fill="x", pady=(12, 0))
 
-        ctk.CTkLabel(sched, text="開始日時", font=("", 12)).pack(side="left", padx=(14, 4), pady=10)
+        # 1行目：日時入力 ＋ ボタン類
+        sched_row = ctk.CTkFrame(sched, fg_color="transparent")
+        sched_row.pack(fill="x", padx=14, pady=(10, 4))
+
+        ctk.CTkLabel(sched_row, text="開始日時", font=("", 12)).pack(side="left", padx=(0, 4))
         self.start_datetime_entry = ctk.CTkEntry(
-            sched, width=155, placeholder_text="例: 2026/05/10 10:00"
+            sched_row, width=155, placeholder_text="例: 2026/05/10 10:00"
         )
         self.start_datetime_entry.pack(side="left", padx=4)
-        ctk.CTkLabel(
-            sched, text="以降 1日おきに自動投稿", font=("", 11), text_color="gray"
-        ).pack(side="left", padx=10)
+
         ctk.CTkButton(
-            sched, text="⏹ 停止", width=80,
+            sched_row, text="⏹ 停止", width=80,
             fg_color="#553333", hover_color="#774444", text_color="#ffaaaa",
             command=self._on_stop_schedule,
-        ).pack(side="right", padx=(4, 14))
+        ).pack(side="right", padx=(4, 0))
         ctk.CTkButton(
-            sched, text="▶ スケジュール開始", width=150,
-            command=self._on_start_schedule,
-        ).pack(side="right", padx=4)
+            sched_row, text="📅 一日ごと投稿予約", width=160,
+            command=self._on_batch_schedule,
+        ).pack(side="right", padx=(8, 4))
+
+        # 2行目：注意書き（⑤ Phase1 の制約をユーザーに明示）
+        ctk.CTkLabel(
+            sched,
+            text="※ 本バージョンではアプリ起動中のみ自動投稿が実行されます。"
+                 "　個別予約は各カードの「📅 予約」ボタンから設定できます。",
+            font=("", 10), text_color="#778899",
+        ).pack(anchor="w", padx=14, pady=(0, 8))
 
     def _build_settings_tab(self, parent):
         """設定タブの UI 要素を構築する。"""
@@ -251,7 +262,7 @@ class App(ctk.CTk):
             font=("", 10), text_color="gray",
         ).pack(anchor="w", pady=(2, 4))
 
-        # 書き方の例を折りたたみラベルとして表示
+        # 書き方の例
         example_text = (
             "【書き方の例】\n"
             "この画像に合うInstagramキャプションを日本語で書いてください。\n"
@@ -269,7 +280,6 @@ class App(ctk.CTk):
 
         self.prompt_textbox = ctk.CTkTextbox(prompt_frame, height=140, width=480, font=("", 11))
         self.prompt_textbox.pack(anchor="w")
-        # 保存済みのカスタムプロンプトがあれば読み込む
         saved_prompt = self.config_mgr.get("caption_prompt")
         if saved_prompt:
             self.prompt_textbox.insert("0.0", saved_prompt)
@@ -334,7 +344,6 @@ class App(ctk.CTk):
         if not pending:
             self._set_status("処理対象の画像がありません（待機中の画像をドロップしてください）")
             return
-        # UI がフリーズしないようバックグラウンドスレッドで実行する
         threading.Thread(
             target=self._batch_process_worker, args=(pending,), daemon=True
         ).start()
@@ -346,18 +355,14 @@ class App(ctk.CTk):
         UI の更新は after() でメインスレッドに委譲する。
         """
         total = len(jobs)
-        # 設定タブのキャプション指示文を取得（空なら None → GeminiClient のデフォルトを使用）
         custom_prompt = self.config_mgr.get("caption_prompt").strip() or None
 
         for index, job in enumerate(jobs):
-            # プログレスバーを現在の進捗に更新する
             self.after(0, lambda p=index / total, i=index, t=total: self._update_progress(p, i, t))
-
             self.queue_mgr.update(job["id"], status="processing")
             self.after(0, self._refresh_queue_list)
 
             try:
-                # Step 1: 安全チェック＋キャプション生成を1回の API で実行（無料枠の節約）
                 is_safe, ng_reason, caption = self.gemini.analyze_image(
                     job["original_path"], custom_caption_prompt=custom_prompt
                 )
@@ -365,7 +370,6 @@ class App(ctk.CTk):
                     self.queue_mgr.update(job["id"], status="ng", ng_reason=ng_reason)
                     continue
 
-                # Step 2: 画像補正
                 corrected_path = self.image_processor.auto_correct(job["original_path"])
                 self.queue_mgr.update(
                     job["id"], corrected_path=corrected_path, caption=caption, status="ready"
@@ -378,7 +382,6 @@ class App(ctk.CTk):
 
             self.after(0, self._refresh_queue_list)
 
-        # 完了：プログレスバーを 100% にして 2 秒後にリセット
         self.after(0, lambda: self._update_progress(1.0, total, total))
         self.after(2000, lambda: self._update_progress(0.0, 0, 0))
         self.after(0, lambda: self._set_status("✅ 一括処理が完了しました"))
@@ -388,13 +391,10 @@ class App(ctk.CTk):
         self.progress_bar.set(value)
         self.progress_label.configure(text=f"{current}/{total}" if total > 0 else "")
 
-    def _on_start_schedule(self):
+    def _on_batch_schedule(self):
         """
-        処理済みジョブに投稿日時を割り当て、Poster に登録する。
-
-        各ジョブに個別日時が設定されていればそちらを優先する。
-        未設定のジョブは開始日時を起点に 1 日ずつ自動割り当てする。
-        過去日時が設定されている場合はそのジョブをスキップしてユーザーに警告する。
+        開始日時から 1 日おきに、全ての処理済みジョブを一括でスケジュール登録する。
+        個別に日時を設定したい場合は各カードの「📅 予約」ボタンを使う。
         """
         if not self.poster:
             self._set_status("❌ Instagram / imgbb の API キーを設定してください")
@@ -413,40 +413,24 @@ class App(ctk.CTk):
             return
 
         now = datetime.now()
-        auto_day_offset = 0   # 個別日時が未設定のジョブに連番で割り当てるオフセット
         scheduled_count = 0
-        past_names: list[str] = []  # 過去日時でスキップされたファイル名
+        past_names: list[str] = []
 
-        for job in ready_jobs:
-            job_id = job["id"]
+        for i, job in enumerate(ready_jobs):
+            scheduled_at = start_dt + timedelta(days=i)
 
-            # 個別に設定された日時があればそちらを使う
-            date_str = self._date_vars[job_id].get().strip() if job_id in self._date_vars else ""
-
-            if date_str:
-                try:
-                    scheduled_at = datetime.strptime(date_str, "%Y/%m/%d %H:%M")
-                except ValueError:
-                    self._set_status(f"❌ 日時の形式が正しくありません: {date_str}")
-                    return
-            else:
-                # 個別設定なし → 開始日時 + 連番で自動割り当て
-                scheduled_at = start_dt + timedelta(days=auto_day_offset)
-                auto_day_offset += 1
-                # 自動割り当て結果を StringVar に反映して表示を同期させる
-                formatted = scheduled_at.strftime("%Y/%m/%d %H:%M")
-                if job_id not in self._date_vars:
-                    self._date_vars[job_id] = ctk.StringVar()
-                self._date_vars[job_id].set(formatted)
-
-            # 過去日時チェック：スキップして次のジョブへ
             if scheduled_at < now:
                 past_names.append(os.path.basename(job["original_path"]))
                 continue
 
-            # Poster にスケジュール登録する
+            # StringVar を更新して日時エントリの表示を同期する
+            formatted = scheduled_at.strftime("%Y/%m/%d %H:%M")
+            if job["id"] not in self._date_vars:
+                self._date_vars[job["id"]] = ctk.StringVar()
+            self._date_vars[job["id"]].set(formatted)
+
             scheduled_iso = scheduled_at.isoformat()
-            self.queue_mgr.update(job_id, scheduled_at=scheduled_iso)
+            self.queue_mgr.update(job["id"], scheduled_at=scheduled_iso)
             self.poster.submit({**job, "scheduled_at": scheduled_iso})
             scheduled_count += 1
 
@@ -454,14 +438,12 @@ class App(ctk.CTk):
 
         if past_names:
             names_str = "、".join(past_names)
-            self._set_status(
-                f"⚠️ 過去の日時が設定されています。日付を修正してください → {names_str}"
-            )
+            self._set_status(f"⚠️ 過去の日時です。修正してください → {names_str}")
         else:
-            self._set_status(f"✅ {scheduled_count} 件のスケジュールを登録しました")
+            self._set_status(f"✅ {scheduled_count} 件を一日ごとにスケジュール登録しました")
 
     def _on_stop_schedule(self):
-        """スケジュール済みのジョブをすべてキャンセルする。"""
+        """スケジュール済みのジョブをすべてキャンセルして ready に戻す。"""
         if not self.poster:
             return
         scheduled = [j for j in self.queue_mgr.jobs if j["status"] == "scheduled"]
@@ -471,8 +453,11 @@ class App(ctk.CTk):
         self._set_status(f"{len(scheduled)} 件のスケジュールを停止しました")
 
     def _on_clear_done(self):
-        """投稿済み・NG・エラーのジョブをキューから削除する。"""
-        removable = [j for j in self.queue_mgr.jobs if j["status"] in ("posted", "ng", "error")]
+        """投稿済み・NG・エラー・日時経過のジョブをキューから削除する。"""
+        removable = [
+            j for j in self.queue_mgr.jobs
+            if j["status"] in ("posted", "ng", "error", "expired")
+        ]
         for job in removable:
             self._date_vars.pop(job["id"], None)
             self.queue_mgr.remove(job["id"])
@@ -483,7 +468,6 @@ class App(ctk.CTk):
         for key, entry in self.entries.items():
             self.config_mgr.set(key, entry.get().strip())
         self.config_mgr.set("posting_mode", self.mode_var.get())
-        # キャプション指示文（末尾の余分な改行を除去して保存）
         prompt = self.prompt_textbox.get("0.0", "end").strip()
         self.config_mgr.set("caption_prompt", prompt)
         self.config_mgr.save()
@@ -491,10 +475,7 @@ class App(ctk.CTk):
         self._set_status("✅ 設定を保存しました")
 
     def _on_post_done(self, job_id: str):
-        """
-        投稿完了時に LocalPoster から呼ばれるコールバック。
-        バックグラウンドスレッドから呼ばれるため after() で UI 更新を行う。
-        """
+        """投稿完了時コールバック。after() で UI 更新をメインスレッドに委譲する。"""
         self.after(0, self._refresh_queue_list)
         job = self.queue_mgr.get(job_id)
         if job:
@@ -516,7 +497,6 @@ class App(ctk.CTk):
 
     def _refresh_queue_list(self):
         """キュー一覧の UI を queue_mgr.jobs の現在状態で再描画する。"""
-        # 既存ウィジェットを全削除してから再描画する（シンプルだが確実）
         for widget in self.queue_frame.winfo_children():
             widget.destroy()
 
@@ -537,10 +517,13 @@ class App(ctk.CTk):
         row = ctk.CTkFrame(self.queue_frame, fg_color="#1e1e2e", corner_radius=8)
         row.pack(fill="x", pady=3, padx=2)
 
-        # ── サムネイル（補正後 → 元画像 の優先順） ──
+        # ── サムネイル ──
+        # EXIF の回転情報（縦向き写真など）を exif_transpose で適用してから表示する。
+        # これをしないとドラッグ時点で横向きに表示されてしまう。
         img_path = job.get("corrected_path") or job.get("original_path", "")
         try:
             pil_img = Image.open(img_path)
+            pil_img = ImageOps.exif_transpose(pil_img)   # ← EXIF 回転を適用
             pil_img.thumbnail((48, 48))
             thumb = ctk.CTkImage(pil_img, size=(48, 48))
             ctk.CTkLabel(row, image=thumb, text="").pack(side="left", padx=10, pady=8)
@@ -551,29 +534,24 @@ class App(ctk.CTk):
         info = ctk.CTkFrame(row, fg_color="transparent")
         info.pack(side="left", fill="both", expand=True, padx=4)
 
-        # ファイル名
         ctk.CTkLabel(
             info,
             text=os.path.basename(job.get("original_path", "")),
             font=("", 12, "bold"), anchor="w",
         ).pack(fill="x")
 
-        # キャプション / NG 理由 / エラーメッセージ
         sub_text = job.get("ng_reason") or job.get("error_message") or job.get("caption") or "─"
         ctk.CTkLabel(
             info, text=sub_text[:80],
             font=("", 10), text_color="gray", anchor="w",
         ).pack(fill="x")
 
-        # 投稿日時エントリ（処理済み・スケジュール済みのジョブに表示）
-        # StringVar で管理することで _refresh_queue_list 後も入力値を保持する
+        # 投稿日時エントリ＋個別予約ボタン（処理済み・予約済みのジョブに表示）
         if job["status"] in ("ready", "scheduled"):
             date_row = ctk.CTkFrame(info, fg_color="transparent")
             date_row.pack(fill="x", pady=(2, 0))
-            ctk.CTkLabel(date_row, text="📅", font=("", 10), width=16).pack(side="left")
 
             job_id = job["id"]
-            # StringVar が未登録なら既存の scheduled_at を初期値にして作成する
             if job_id not in self._date_vars:
                 initial = ""
                 if job.get("scheduled_at"):
@@ -589,10 +567,18 @@ class App(ctk.CTk):
                 date_row,
                 textvariable=self._date_vars[job_id],
                 placeholder_text="YYYY/MM/DD HH:MM",
-                width=140,
+                width=130,
                 height=22,
                 font=("", 10),
-            ).pack(side="left", padx=4)
+            ).pack(side="left", padx=(0, 4))
+
+            # ② 個別予約ボタン
+            ctk.CTkButton(
+                date_row, text="📅 予約", width=70, height=22,
+                font=("", 10),
+                fg_color="#1a2a4a", hover_color="#2a3a6a",
+                command=lambda jid=job_id: self._schedule_single_job(jid),
+            ).pack(side="left")
 
         # ── 右側：ステータスバッジ ──
         label, bg, fg = self.STATUS_BADGE.get(job["status"], ("?", "#333", "#aaa"))
@@ -612,20 +598,65 @@ class App(ctk.CTk):
         ).pack(side="right", padx=(4, 0))
 
         # 今すぐ投稿ボタン（処理済み・スケジュール済み・エラー状態のときのみ表示）
-        if job["status"] in ("ready", "scheduled", "error"):
+        if job["status"] in ("ready", "scheduled", "error", "expired"):
             ctk.CTkButton(
                 row, text="📤 今すぐ投稿", width=110,
                 fg_color="#2a4a2a", hover_color="#3a6a3a",
                 command=lambda jid=job_id: self._post_now(jid),
             ).pack(side="right", padx=(4, 0))
 
-        # キャプション編集ボタン（処理済み・スケジュール済み・投稿済みに表示）
+        # キャプション編集ボタン
         if job["status"] in ("ready", "scheduled", "posted"):
             ctk.CTkButton(
                 row, text="✏️", width=34,
                 fg_color="#2a3a4a", hover_color="#3a4a6a",
                 command=lambda jid=job_id: self._edit_caption(jid),
             ).pack(side="right", padx=(4, 0))
+
+    def _schedule_single_job(self, job_id: str):
+        """
+        個別の「📅 予約」ボタンから1件だけスケジュール登録する。
+        日時エントリの値を読み取って検証し、問題なければ Poster に登録する。
+        """
+        if not self.poster:
+            self._set_status("❌ Instagram / imgbb の API キーを設定してください")
+            return
+
+        job = self.queue_mgr.get(job_id)
+        if not job:
+            return
+
+        date_str = self._date_vars[job_id].get().strip() if job_id in self._date_vars else ""
+        if not date_str:
+            self._set_status("❌ 投稿日時を入力してください（YYYY/MM/DD HH:MM 形式）")
+            return
+
+        try:
+            scheduled_at = datetime.strptime(date_str, "%Y/%m/%d %H:%M")
+        except ValueError:
+            self._set_status("❌ 日時の形式が正しくありません（例: 2026/05/10 10:00）")
+            return
+
+        if scheduled_at < datetime.now():
+            self._set_status(f"⚠️ 過去の日時です。修正してください: {date_str}")
+            return
+
+        # 既にスケジュール済みの場合はいったんキャンセルしてから再登録する
+        if job["status"] == "scheduled":
+            self.poster.cancel(job_id)
+
+        scheduled_iso = scheduled_at.isoformat()
+        self.queue_mgr.update(job_id, scheduled_at=scheduled_iso)
+        success = self.poster.submit({**job, "scheduled_at": scheduled_iso})
+
+        self._refresh_queue_list()
+        if success:
+            self._set_status(
+                f"✅ 予約しました: {os.path.basename(job['original_path'])} → "
+                f"{scheduled_at.strftime('%Y/%m/%d %H:%M')}"
+            )
+        else:
+            self._set_status("❌ 予約に失敗しました。エラー詳細はターミナルを確認してください")
 
     def _edit_caption(self, job_id: str):
         """キャプション編集ダイアログを開く（モーダルウィンドウ）。"""
@@ -636,7 +667,7 @@ class App(ctk.CTk):
         dialog = ctk.CTkToplevel(self)
         dialog.title("キャプションを編集")
         dialog.geometry("520x360")
-        dialog.grab_set()   # モーダルにして背面の操作を防ぐ
+        dialog.grab_set()
         dialog.focus_set()
 
         ctk.CTkLabel(
@@ -690,7 +721,7 @@ class App(ctk.CTk):
         """指定ジョブをキャンセルしてキューから削除する。"""
         if self.poster:
             self.poster.cancel(job_id)
-        self._date_vars.pop(job_id, None)   # StringVar も合わせて破棄する
+        self._date_vars.pop(job_id, None)
         self.queue_mgr.remove(job_id)
         self._refresh_queue_list()
 
@@ -714,7 +745,6 @@ class App(ctk.CTk):
         status が "posted" や "error" に更新される。ポーリングでその変化を
         検知して UI を自動更新し、ユーザーに通知する。
         """
-        # メモリ上の旧ステータスを保存してから disk を再読み込みする
         old_statuses = {j["id"]: j["status"] for j in self.queue_mgr.jobs}
         self.queue_mgr.jobs = self.queue_mgr._load()
 
@@ -734,5 +764,4 @@ class App(ctk.CTk):
         if changed:
             self._refresh_queue_list()
 
-        # 次回のポーリングを予約（アプリが生きている限りループし続ける）
         self.after(self.POLL_INTERVAL_MS, self._poll_jobs)

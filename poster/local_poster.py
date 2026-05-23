@@ -31,6 +31,32 @@ class LocalPoster(PosterBase):
         self.scheduler = Scheduler()
         self.scheduler.start()
 
+        # スケジューラー起動直後に期限切れジョブを処理する。
+        # APScheduler は起動時に past-due ジョブを即座に実行しようとするが、
+        # remove_job → status="expired" に変更することで実行を防ぐ。
+        self._expire_past_jobs()
+
+    def _expire_past_jobs(self):
+        """
+        投稿日時が既に過ぎているジョブを APScheduler から削除し
+        ステータスを "expired" に変更する。
+        アプリ停止中に投稿日時を経過した場合の意図しない投稿を防ぐ。
+        """
+        now = datetime.now()
+        for job in self.queue_manager.jobs:
+            if job["status"] == "scheduled" and job.get("scheduled_at"):
+                try:
+                    scheduled_at = datetime.fromisoformat(job["scheduled_at"])
+                    if scheduled_at < now:
+                        self.scheduler.remove_job(job["id"])
+                        self.queue_manager.update(
+                            job["id"],
+                            status="expired",
+                            error_message="アプリ停止中に投稿日時を過ぎました",
+                        )
+                except ValueError:
+                    pass
+
     def submit(self, job: dict) -> bool:
         """APScheduler にジョブを登録する。"""
         try:
