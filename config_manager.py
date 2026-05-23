@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 
 CONFIG_FILE = "config.json"
@@ -22,6 +22,8 @@ class ConfigManager:
         "posting_mode": "local",
         "server_url": "",
         "server_api_key": "",
+        # 空文字のときは GeminiClient のデフォルトプロンプトを使用する
+        "combined_prompt": "",
     }
 
     def __init__(self):

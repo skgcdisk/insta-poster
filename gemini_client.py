@@ -33,10 +33,17 @@ class GeminiClient:
     def __init__(self, api_key: str):
         self.client = genai.Client(api_key=api_key)
 
-    def analyze_image(self, image_path: str) -> tuple[bool, str, str]:
+    def analyze_image(
+        self, image_path: str, custom_prompt: str | None = None
+    ) -> tuple[bool, str, str]:
         """
         安全チェックとキャプション生成を1回のAPI呼び出しでまとめて実行する。
         API 呼び出し回数を半減できるため、無料枠の節約になる。
+
+        Args:
+            image_path:    解析する画像のパス
+            custom_prompt: 設定タブで編集されたカスタムプロンプト。
+                           None または空文字の場合は COMBINED_PROMPT を使用する。
 
         Returns:
             (is_safe, ng_reason, caption)
@@ -44,10 +51,11 @@ class GeminiClient:
             - ng_reason: NG の場合の理由（安全なら空文字）
             - caption  : 生成されたキャプション（NG なら空文字）
         """
+        prompt = custom_prompt if custom_prompt else self.COMBINED_PROMPT
         img = Image.open(image_path)
         response = self.client.models.generate_content(
             model=self.MODEL,
-            contents=[self.COMBINED_PROMPT, img],
+            contents=[prompt, img],
         )
         text = response.text.strip()
 

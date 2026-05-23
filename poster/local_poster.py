@@ -1,6 +1,5 @@
-﻿from datetime import datetime
+from datetime import datetime
 
-from instagram_client import InstagramClient
 from queue_manager import QueueManager
 from scheduler import Scheduler
 from poster.base import PosterBase
@@ -11,8 +10,14 @@ class LocalPoster(PosterBase):
     Phase1 用のローカル投稿クラス。
 
     APScheduler がバックグラウンドで動き続け、指定日時になると
-    自動的に Instagram へ投稿する。スケジュールは SQLite に保存されるため
-    アプリを再起動しても予約が維持される。
+    post_job.execute_post() を自動的に呼び出して Instagram へ投稿する。
+    スケジュールは SQLite に保存されるためアプリ再起動後も維持される。
+
+    【設計上の注意】
+    投稿処理は post_job.py のモジュールレベル関数が担う。
+    tkinter オブジェクトへの参照を持つメソッドは pickle できないため、
+    このクラスは「スケジュール登録・管理」のみを責務とする。
+    UI への完了通知はアプリ側のポーリングで行う。
     """
 
     def __init__(self, config: dict, queue_manager: QueueManager, on_post_done=None):
@@ -20,19 +25,10 @@ class LocalPoster(PosterBase):
         Args:
             config:        ConfigManager.config 辞書
             queue_manager: 共有の QueueManager インスタンス
-            on_post_done:  投稿完了時に呼ばれるコールバック関数（UI 通知用）
+            on_post_done:  現バージョンでは未使用（将来の拡張用に保持）
         """
         self.queue_manager = queue_manager
-        self.on_post_done  = on_post_done
-
-        self.instagram = InstagramClient(
-            user_id=config["instagram_user_id"],
-            access_token=config["instagram_access_token"],
-            imgbb_api_key=config["imgbb_api_key"],
-        )
-
-        # スケジューラーに投稿実行関数を渡して初期化・起動
-        self.scheduler = Scheduler(post_func=self._execute_post)
+        self.scheduler = Scheduler()
         self.scheduler.start()
 
     def submit(self, job: dict) -> bool:
@@ -61,25 +57,6 @@ class LocalPoster(PosterBase):
         if not job:
             return {"status": "not_found", "error": ""}
         return {"status": job["status"], "error": job.get("error_message", "")}
-
-    def _execute_post(self, job_id: str):
-        """
-        APScheduler から呼ばれる実際の投稿処理。
-        バックグラウンドスレッドで実行される。
-        """
-        job = self.queue_manager.get(job_id)
-        if not job:
-            return
-
-        try:
-            post_id = self.instagram.post(job["corrected_path"], job["caption"])
-            self.queue_manager.update(job_id, status="posted", instagram_post_id=post_id)
-        except Exception as e:
-            self.queue_manager.update(job_id, status="error", error_message=str(e))
-        finally:
-            # UI への通知は after() 経由でメインスレッドに渡す（app.py 側で処理）
-            if self.on_post_done:
-                self.on_post_done(job_id)
 
     def shutdown(self):
         """アプリ終了時にスケジューラーを安全に停止する。"""

@@ -54,6 +54,9 @@ class InstagramClient:
             },
             timeout=30,
         )
+        # エラー時は Instagram からの詳細メッセージをターミナルに出力する
+        if not response.ok:
+            print(f"[instagram] エラー詳細: {response.text}")
         response.raise_for_status()
         return response.json()["id"]
 

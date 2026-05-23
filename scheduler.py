@@ -1,8 +1,11 @@
-﻿import logging
+import logging
 from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+
+# post_job.execute_post はモジュールレベル関数なので SQLite に pickle 保存できる
+from post_job import execute_post
 
 # APScheduler の INFO ログは冗長なので WARNING 以上のみ表示する
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
@@ -17,19 +20,19 @@ class Scheduler:
 
     SQLite でジョブを永続化するため、アプリを再起動しても
     投稿予約が消えずに復元される。
+
+    【pickle 問題の解決策】
+    APScheduler の SQLite ジョブストアはジョブ関数を pickle（直列化）して保存する。
+    クラスのメソッドや tkinter オブジェクトへの参照を含む関数は pickle できないため、
+    ジョブ関数は post_job.py のモジュールレベル関数 execute_post を使う。
     """
 
-    def __init__(self, post_func):
-        """
-        Args:
-            post_func: job_id (str) を引数に取る投稿実行関数
-        """
+    def __init__(self):
         jobstores = {"default": SQLAlchemyJobStore(url=JOBSTORE_URL)}
         self.scheduler = BackgroundScheduler(
             jobstores=jobstores,
             timezone="Asia/Tokyo",
         )
-        self.post_func = post_func
 
     def start(self):
         """スケジューラーを起動する。既に起動済みの場合は何もしない。"""
@@ -43,11 +46,11 @@ class Scheduler:
 
     def add_job(self, job_id: str, scheduled_at: datetime):
         """
-        指定日時に post_func(job_id) を実行するジョブを登録する。
+        指定日時に execute_post(job_id) を実行するジョブを登録する。
         同じ job_id が既に登録済みの場合は上書きする。
         """
         self.scheduler.add_job(
-            self.post_func,
+            execute_post,           # モジュールレベル関数 → pickle 可能
             trigger="date",
             run_date=scheduled_at,
             args=[job_id],

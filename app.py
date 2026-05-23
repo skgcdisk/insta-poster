@@ -1,5 +1,4 @@
-﻿import os
-import time
+import os
 import threading
 from datetime import datetime, timedelta
 
@@ -26,8 +25,10 @@ class App(ctk.CTk):
     多重継承は不要で `self.tk.call('package', 'require', 'tkdnd')` だけで動作する。
     """
 
-    WINDOW_TITLE = "insta-poster"
-    WINDOW_SIZE  = "880x700"
+    WINDOW_TITLE    = "insta-poster"
+    WINDOW_SIZE     = "880x780"
+    # スケジュール済みジョブの状態変化を確認するポーリング間隔（ミリ秒）
+    POLL_INTERVAL_MS = 30_000
 
     # キューアイテムのステータスに対応する（表示ラベル, 背景色, 文字色）
     STATUS_BADGE = {
@@ -69,9 +70,16 @@ class App(ctk.CTk):
         self.gemini: GeminiClient | None = None   # Gemini API キー設定後に初期化
         self.poster: PosterBase | None  = None   # 各種 API キー設定後に初期化
 
+        # 各ジョブの投稿日時を個別管理する StringVar 辞書。
+        # _refresh_queue_list でウィジェットを再生成しても値を保持するために使う。
+        self._date_vars: dict[str, ctk.StringVar] = {}
+
         self._init_clients()
         self._build_ui()
         self._refresh_queue_list()
+
+        # スケジュール済みジョブの投稿完了を定期的に確認するポーリングを開始する
+        self._start_polling()
 
         # ウィンドウを閉じるときにスケジューラーを安全に停止する
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -133,7 +141,7 @@ class App(ctk.CTk):
 
         # ── キュー操作ボタン行 ──
         btn_row = ctk.CTkFrame(parent, fg_color="transparent")
-        btn_row.pack(fill="x", pady=(0, 6))
+        btn_row.pack(fill="x", pady=(0, 4))
         ctk.CTkLabel(btn_row, text="投稿キュー", font=("", 12, "bold")).pack(side="left")
         ctk.CTkButton(
             btn_row, text="🗑 完了・NG を削除", width=130,
@@ -145,8 +153,19 @@ class App(ctk.CTk):
             command=self._on_batch_process,
         ).pack(side="right", padx=(0, 8))
 
+        # ── プログレスバー（一括処理中に進捗を表示） ──
+        prog_row = ctk.CTkFrame(parent, fg_color="transparent")
+        prog_row.pack(fill="x", pady=(0, 4))
+        self.progress_bar = ctk.CTkProgressBar(prog_row, height=10)
+        self.progress_bar.set(0)
+        self.progress_bar.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.progress_label = ctk.CTkLabel(
+            prog_row, text="", font=("", 10), text_color="gray", width=60, anchor="e"
+        )
+        self.progress_label.pack(side="left")
+
         # ── キュー一覧（スクロール可能） ──
-        self.queue_frame = ctk.CTkScrollableFrame(parent, height=280)
+        self.queue_frame = ctk.CTkScrollableFrame(parent, height=300)
         self.queue_frame.pack(fill="both", expand=True)
 
         # ── スケジュール設定バー ──
@@ -216,6 +235,27 @@ class App(ctk.CTk):
 
         self._on_mode_change()  # 初期表示切替
 
+        # ── AI プロンプト編集 ──
+        prompt_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        prompt_frame.pack(fill="x", pady=(16, 0))
+        ctk.CTkLabel(
+            prompt_frame,
+            text="AI 分析プロンプト（安全チェック＋キャプション生成）",
+            font=("", 12, "bold"),
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            prompt_frame,
+            text="空欄のままにするとデフォルトのプロンプトが使用されます。\n"
+                 "「SAFETY: OK / NG:理由」「CAPTION: 本文」の形式で返答するよう記述してください。",
+            font=("", 10), text_color="gray",
+        ).pack(anchor="w", pady=(2, 4))
+        self.prompt_textbox = ctk.CTkTextbox(prompt_frame, height=160, width=480, font=("", 11))
+        self.prompt_textbox.pack(anchor="w")
+        # 保存済みのカスタムプロンプトがあれば読み込む
+        saved_prompt = self.config_mgr.get("combined_prompt")
+        if saved_prompt:
+            self.prompt_textbox.insert("0.0", saved_prompt)
+
         ctk.CTkButton(
             scroll, text="💾 保存する", width=160, command=self._on_save_config
         ).pack(anchor="w", pady=12)
@@ -284,34 +324,60 @@ class App(ctk.CTk):
     def _batch_process_worker(self, jobs: list[dict]):
         """
         バックグラウンドスレッドで一括処理を実行するワーカー。
+        プログレスバーを更新しながら各画像を順番に処理する。
         UI の更新は after() でメインスレッドに委譲する。
         """
-        for job in jobs:
+        total = len(jobs)
+        # 設定タブのカスタムプロンプトを取得（空なら None → GeminiClient のデフォルトを使用）
+        custom_prompt = self.config_mgr.get("combined_prompt").strip() or None
+
+        for index, job in enumerate(jobs):
+            # プログレスバーを現在の進捗に更新する
+            self.after(0, lambda p=index / total, i=index, t=total: self._update_progress(p, i, t))
+
             self.queue_mgr.update(job["id"], status="processing")
             self.after(0, self._refresh_queue_list)
 
             try:
-                # Step 1: 安全チェック＋キャプション生成を1回のAPIで実行（無料枠の節約）
-                is_safe, ng_reason, caption = self.gemini.analyze_image(job["original_path"])
+                # Step 1: 安全チェック＋キャプション生成を1回の API で実行（無料枠の節約）
+                is_safe, ng_reason, caption = self.gemini.analyze_image(
+                    job["original_path"], custom_prompt=custom_prompt
+                )
                 if not is_safe:
                     self.queue_mgr.update(job["id"], status="ng", ng_reason=ng_reason)
                     continue
 
                 # Step 2: 画像補正
                 corrected_path = self.image_processor.auto_correct(job["original_path"])
-                self.queue_mgr.update(job["id"], corrected_path=corrected_path, caption=caption, status="ready")
+                self.queue_mgr.update(
+                    job["id"], corrected_path=corrected_path, caption=caption, status="ready"
+                )
 
             except Exception as e:
                 import traceback
-                traceback.print_exc()   # ターミナルにスタックトレースを表示
+                traceback.print_exc()
                 self.queue_mgr.update(job["id"], status="error", error_message=str(e))
 
             self.after(0, self._refresh_queue_list)
 
+        # 完了：プログレスバーを 100% にして 2 秒後にリセット
+        self.after(0, lambda: self._update_progress(1.0, total, total))
+        self.after(2000, lambda: self._update_progress(0.0, 0, 0))
         self.after(0, lambda: self._set_status("✅ 一括処理が完了しました"))
 
+    def _update_progress(self, value: float, current: int, total: int):
+        """プログレスバーと進捗ラベルを更新する（メインスレッドから呼ぶこと）。"""
+        self.progress_bar.set(value)
+        self.progress_label.configure(text=f"{current}/{total}" if total > 0 else "")
+
     def _on_start_schedule(self):
-        """処理済みジョブに投稿日時を割り当て、Poster に登録する。"""
+        """
+        処理済みジョブに投稿日時を割り当て、Poster に登録する。
+
+        各ジョブに個別日時が設定されていればそちらを優先する。
+        未設定のジョブは開始日時を起点に 1 日ずつ自動割り当てする。
+        過去日時が設定されている場合はそのジョブをスキップしてユーザーに警告する。
+        """
         if not self.poster:
             self._set_status("❌ Instagram / imgbb の API キーを設定してください")
             return
@@ -328,13 +394,53 @@ class App(ctk.CTk):
             self._set_status("スケジュール登録できる画像がありません（先に一括処理を実行してください）")
             return
 
-        for i, job in enumerate(ready_jobs):
-            scheduled_at = (start_dt + timedelta(days=i)).isoformat()
-            self.queue_mgr.update(job["id"], scheduled_at=scheduled_at)
-            self.poster.submit({**job, "scheduled_at": scheduled_at})
+        now = datetime.now()
+        auto_day_offset = 0   # 個別日時が未設定のジョブに連番で割り当てるオフセット
+        scheduled_count = 0
+        past_names: list[str] = []  # 過去日時でスキップされたファイル名
+
+        for job in ready_jobs:
+            job_id = job["id"]
+
+            # 個別に設定された日時があればそちらを使う
+            date_str = self._date_vars[job_id].get().strip() if job_id in self._date_vars else ""
+
+            if date_str:
+                try:
+                    scheduled_at = datetime.strptime(date_str, "%Y/%m/%d %H:%M")
+                except ValueError:
+                    self._set_status(f"❌ 日時の形式が正しくありません: {date_str}")
+                    return
+            else:
+                # 個別設定なし → 開始日時 + 連番で自動割り当て
+                scheduled_at = start_dt + timedelta(days=auto_day_offset)
+                auto_day_offset += 1
+                # 自動割り当て結果を StringVar に反映して表示を同期させる
+                formatted = scheduled_at.strftime("%Y/%m/%d %H:%M")
+                if job_id not in self._date_vars:
+                    self._date_vars[job_id] = ctk.StringVar()
+                self._date_vars[job_id].set(formatted)
+
+            # 過去日時チェック：スキップして次のジョブへ
+            if scheduled_at < now:
+                past_names.append(os.path.basename(job["original_path"]))
+                continue
+
+            # Poster にスケジュール登録する
+            scheduled_iso = scheduled_at.isoformat()
+            self.queue_mgr.update(job_id, scheduled_at=scheduled_iso)
+            self.poster.submit({**job, "scheduled_at": scheduled_iso})
+            scheduled_count += 1
 
         self._refresh_queue_list()
-        self._set_status(f"✅ {len(ready_jobs)} 件のスケジュールを登録しました")
+
+        if past_names:
+            names_str = "、".join(past_names)
+            self._set_status(
+                f"⚠️ 過去の日時が設定されています。日付を修正してください → {names_str}"
+            )
+        else:
+            self._set_status(f"✅ {scheduled_count} 件のスケジュールを登録しました")
 
     def _on_stop_schedule(self):
         """スケジュール済みのジョブをすべてキャンセルする。"""
@@ -350,6 +456,7 @@ class App(ctk.CTk):
         """投稿済み・NG・エラーのジョブをキューから削除する。"""
         removable = [j for j in self.queue_mgr.jobs if j["status"] in ("posted", "ng", "error")]
         for job in removable:
+            self._date_vars.pop(job["id"], None)
             self.queue_mgr.remove(job["id"])
         self._refresh_queue_list()
 
@@ -358,6 +465,9 @@ class App(ctk.CTk):
         for key, entry in self.entries.items():
             self.config_mgr.set(key, entry.get().strip())
         self.config_mgr.set("posting_mode", self.mode_var.get())
+        # プロンプトテキストボックスの内容（末尾の余分な改行を除去して保存）
+        prompt = self.prompt_textbox.get("0.0", "end").strip()
+        self.config_mgr.set("combined_prompt", prompt)
         self.config_mgr.save()
         self._init_clients()
         self._set_status("✅ 設定を保存しました")
@@ -365,7 +475,7 @@ class App(ctk.CTk):
     def _on_post_done(self, job_id: str):
         """
         投稿完了時に LocalPoster から呼ばれるコールバック。
-        バックグラウンドスレッドから呼ばれるため after() でUI更新を行う。
+        バックグラウンドスレッドから呼ばれるため after() で UI 更新を行う。
         """
         self.after(0, self._refresh_queue_list)
         job = self.queue_mgr.get(job_id)
@@ -409,7 +519,7 @@ class App(ctk.CTk):
         row = ctk.CTkFrame(self.queue_frame, fg_color="#1e1e2e", corner_radius=8)
         row.pack(fill="x", pady=3, padx=2)
 
-        # サムネイル表示（補正後 → 元画像 の優先順）
+        # ── サムネイル（補正後 → 元画像 の優先順） ──
         img_path = job.get("corrected_path") or job.get("original_path", "")
         try:
             pil_img = Image.open(img_path)
@@ -419,33 +529,54 @@ class App(ctk.CTk):
         except Exception:
             ctk.CTkLabel(row, text="🖼", font=("", 22), width=48).pack(side="left", padx=10, pady=8)
 
-        # ファイル名・キャプション・スケジュール日時
+        # ── 中央の情報エリア ──
         info = ctk.CTkFrame(row, fg_color="transparent")
         info.pack(side="left", fill="both", expand=True, padx=4)
 
+        # ファイル名
         ctk.CTkLabel(
             info,
             text=os.path.basename(job.get("original_path", "")),
             font=("", 12, "bold"), anchor="w",
         ).pack(fill="x")
 
+        # キャプション / NG 理由 / エラーメッセージ
         sub_text = job.get("ng_reason") or job.get("error_message") or job.get("caption") or "─"
         ctk.CTkLabel(
             info, text=sub_text[:80],
             font=("", 10), text_color="gray", anchor="w",
         ).pack(fill="x")
 
-        if job.get("scheduled_at"):
-            try:
-                dt_str = datetime.fromisoformat(job["scheduled_at"]).strftime("%Y/%m/%d %H:%M")
-                ctk.CTkLabel(
-                    info, text=f"📅 {dt_str}",
-                    font=("", 10), text_color="#7788aa", anchor="w",
-                ).pack(fill="x")
-            except ValueError:
-                pass
+        # 投稿日時エントリ（処理済み・スケジュール済みのジョブに表示）
+        # StringVar で管理することで _refresh_queue_list 後も入力値を保持する
+        if job["status"] in ("ready", "scheduled"):
+            date_row = ctk.CTkFrame(info, fg_color="transparent")
+            date_row.pack(fill="x", pady=(2, 0))
+            ctk.CTkLabel(date_row, text="📅", font=("", 10), width=16).pack(side="left")
 
-        # ステータスバッジ
+            job_id = job["id"]
+            # StringVar が未登録なら既存の scheduled_at を初期値にして作成する
+            if job_id not in self._date_vars:
+                initial = ""
+                if job.get("scheduled_at"):
+                    try:
+                        initial = datetime.fromisoformat(
+                            job["scheduled_at"]
+                        ).strftime("%Y/%m/%d %H:%M")
+                    except ValueError:
+                        pass
+                self._date_vars[job_id] = ctk.StringVar(value=initial)
+
+            ctk.CTkEntry(
+                date_row,
+                textvariable=self._date_vars[job_id],
+                placeholder_text="YYYY/MM/DD HH:MM",
+                width=140,
+                height=22,
+                font=("", 10),
+            ).pack(side="left", padx=4)
+
+        # ── 右側：ステータスバッジ ──
         label, bg, fg = self.STATUS_BADGE.get(job["status"], ("?", "#333", "#aaa"))
         ctk.CTkLabel(
             row, text=label,
@@ -453,21 +584,137 @@ class App(ctk.CTk):
             corner_radius=6, font=("", 11, "bold"), width=90,
         ).pack(side="right", padx=8)
 
-        # 削除ボタン（スケジュール済みの場合はキャンセルも兼ねる）
         job_id = job["id"]
+
+        # 削除ボタン
         ctk.CTkButton(
             row, text="🗑", width=34,
             fg_color="#2a2a4a", hover_color="#3a3a6a",
             command=lambda jid=job_id: self._remove_job(jid),
         ).pack(side="right", padx=(4, 0))
 
+        # 今すぐ投稿ボタン（処理済み・スケジュール済み・エラー状態のときのみ表示）
+        if job["status"] in ("ready", "scheduled", "error"):
+            ctk.CTkButton(
+                row, text="📤 今すぐ投稿", width=110,
+                fg_color="#2a4a2a", hover_color="#3a6a3a",
+                command=lambda jid=job_id: self._post_now(jid),
+            ).pack(side="right", padx=(4, 0))
+
+        # キャプション編集ボタン（処理済み・スケジュール済み・投稿済みに表示）
+        if job["status"] in ("ready", "scheduled", "posted"):
+            ctk.CTkButton(
+                row, text="✏️", width=34,
+                fg_color="#2a3a4a", hover_color="#3a4a6a",
+                command=lambda jid=job_id: self._edit_caption(jid),
+            ).pack(side="right", padx=(4, 0))
+
+    def _edit_caption(self, job_id: str):
+        """キャプション編集ダイアログを開く（モーダルウィンドウ）。"""
+        job = self.queue_mgr.get(job_id)
+        if not job:
+            return
+
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("キャプションを編集")
+        dialog.geometry("520x360")
+        dialog.grab_set()   # モーダルにして背面の操作を防ぐ
+        dialog.focus_set()
+
+        ctk.CTkLabel(
+            dialog,
+            text=f"📝 {os.path.basename(job['original_path'])}",
+            font=("", 12, "bold"),
+        ).pack(anchor="w", padx=16, pady=(14, 4))
+
+        textbox = ctk.CTkTextbox(dialog, font=("", 11), height=220)
+        textbox.pack(fill="both", expand=True, padx=16, pady=4)
+        textbox.insert("0.0", job.get("caption", ""))
+        textbox.focus_set()
+
+        btn_row = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_row.pack(fill="x", padx=16, pady=(4, 14))
+
+        def _save():
+            new_caption = textbox.get("0.0", "end").strip()
+            self.queue_mgr.update(job_id, caption=new_caption)
+            self._refresh_queue_list()
+            self._set_status("✅ キャプションを保存しました")
+            dialog.destroy()
+
+        ctk.CTkButton(btn_row, text="💾 保存", width=120, command=_save).pack(side="right")
+        ctk.CTkButton(
+            btn_row, text="キャンセル", width=100,
+            fg_color="#3a3a5a", hover_color="#4a4a7a",
+            command=dialog.destroy,
+        ).pack(side="right", padx=(0, 8))
+
+    def _post_now(self, job_id: str):
+        """「今すぐ投稿」ボタンから即時投稿する。テスト・手動投稿用。"""
+        self._set_status("📤 投稿中...")
+        threading.Thread(
+            target=self._post_now_worker, args=(job_id,), daemon=True
+        ).start()
+
+    def _post_now_worker(self, job_id: str):
+        """バックグラウンドで即時投稿を実行するワーカー。"""
+        from post_job import execute_post
+        execute_post(job_id)
+        self.after(0, self._refresh_queue_list)
+        job = self.queue_mgr.get(job_id)
+        if job and job["status"] == "posted":
+            self.after(0, lambda: self._set_status("✅ 投稿完了！"))
+        else:
+            msg = job.get("error_message", "不明なエラー") if job else "不明なエラー"
+            self.after(0, lambda: self._set_status(f"❌ 投稿エラー: {msg}"))
+
     def _remove_job(self, job_id: str):
         """指定ジョブをキャンセルしてキューから削除する。"""
         if self.poster:
             self.poster.cancel(job_id)
+        self._date_vars.pop(job_id, None)   # StringVar も合わせて破棄する
         self.queue_mgr.remove(job_id)
         self._refresh_queue_list()
 
     def _set_status(self, message: str):
         """ステータスバーのメッセージを更新する。"""
         self.status_label.configure(text=message)
+
+    # ──────────────────────────────────────────
+    # ポーリング（スケジュール済みジョブの状態監視）
+    # ──────────────────────────────────────────
+
+    def _start_polling(self):
+        """30 秒ごとに _poll_jobs を呼ぶポーリングループを開始する。"""
+        self.after(self.POLL_INTERVAL_MS, self._poll_jobs)
+
+    def _poll_jobs(self):
+        """
+        queue.json をディスクから再読み込みして状態変化を検出する。
+
+        APScheduler がバックグラウンドで投稿を完了すると queue.json の
+        status が "posted" や "error" に更新される。ポーリングでその変化を
+        検知して UI を自動更新し、ユーザーに通知する。
+        """
+        # メモリ上の旧ステータスを保存してから disk を再読み込みする
+        old_statuses = {j["id"]: j["status"] for j in self.queue_mgr.jobs}
+        self.queue_mgr.jobs = self.queue_mgr._load()
+
+        changed = False
+        for job in self.queue_mgr.jobs:
+            old = old_statuses.get(job["id"])
+            new = job["status"]
+            if old != new:
+                changed = True
+                filename = os.path.basename(job.get("original_path", ""))
+                if new == "posted":
+                    self._set_status(f"✅ 投稿完了: {filename}")
+                elif new == "error":
+                    err = job.get("error_message", "不明なエラー")
+                    self._set_status(f"❌ 投稿エラー: {filename} — {err}")
+
+        if changed:
+            self._refresh_queue_list()
+
+        # 次回のポーリングを予約（アプリが生きている限りループし続ける）
+        self.after(self.POLL_INTERVAL_MS, self._poll_jobs)

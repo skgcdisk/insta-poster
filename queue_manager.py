@@ -25,7 +25,8 @@ class QueueManager:
     def _load(self) -> list[dict]:
         """queue.json を読み込む。存在しない場合は空リストを返す。"""
         if os.path.exists(QUEUE_FILE):
-            with open(QUEUE_FILE, "r", encoding="utf-8") as f:
+            # utf-8-sig は BOM あり・なし両方に対応する
+            with open(QUEUE_FILE, "r", encoding="utf-8-sig") as f:
                 return json.load(f)
         return []
 

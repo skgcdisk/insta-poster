@@ -29,3 +29,14 @@ desktop.ini
 # ログ・一時ファイル
 *.log
 *.tmp
+
+# アプリ実行時に自動生成されるファイル（ユーザーごとに異なる）
+queue.json
+jobs.sqlite
+processed/
+
+# PyInstaller ビルド成果物（build.spec はリポジトリに含める）
+*.spec
+!build.spec
+dist/
+build/
