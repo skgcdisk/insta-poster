@@ -460,6 +460,7 @@ class App(ctk.CTk):
         ]
         for job in removable:
             self._date_vars.pop(job["id"], None)
+            self._delete_corrected_file(job)
             self.queue_mgr.remove(job["id"])
         self._refresh_queue_list()
 
@@ -722,8 +723,25 @@ class App(ctk.CTk):
         if self.poster:
             self.poster.cancel(job_id)
         self._date_vars.pop(job_id, None)
+        job = self.queue_mgr.get(job_id)
+        if job:
+            self._delete_corrected_file(job)
         self.queue_mgr.remove(job_id)
         self._refresh_queue_list()
+
+    def _delete_corrected_file(self, job: dict):
+        """
+        processed/ フォルダ内の補正済み画像ファイルを削除する。
+        ジョブをキューから削除するときに合わせて呼び出す。
+        ファイルが存在しない場合やエラーは無視する（元画像には触れない）。
+        """
+        corrected_path = job.get("corrected_path", "")
+        if corrected_path and os.path.exists(corrected_path):
+            try:
+                os.remove(corrected_path)
+                print(f"[app] 補正済みファイルを削除: {corrected_path}")
+            except Exception as e:
+                print(f"[app] 補正済みファイルの削除に失敗: {e}")
 
     def _set_status(self, message: str):
         """ステータスバーのメッセージを更新する。"""

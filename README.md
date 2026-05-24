@@ -78,6 +78,17 @@ python main.py
 
 ---
 
+## 動作環境
+
+| OS | 状況 |
+|---|---|
+| Windows 10 / 11 | ✅ 動作確認済み |
+| macOS | 🔺 理論上は動作するが未検証 |
+| Linux | 🔺 理論上は動作するが未検証 |
+| iOS / Android | ❌ 非対応 |
+
+---
+
 ## 技術スタック
 
 - **UI**: [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter)（ダークテーマ）

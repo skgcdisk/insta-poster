@@ -33,23 +33,43 @@ class InstagramClient:
         self.access_token  = access_token
         self.imgbb_api_key = imgbb_api_key
 
-    def upload_to_imgbb(self, image_path: str) -> str:
+    def upload_to_imgbb(self, image_path: str) -> tuple[str, str]:
         """
-        ローカル画像を imgbb にアップロードして公開 URL を返す。
+        ローカル画像を imgbb にアップロードして公開 URL と削除 URL を返す。
+
+        expiration を設定することで指定秒数後に imgbb 側で自動削除されるが、
+        投稿完了後に delete_url を呼び出して即削除することでより確実に消せる。
 
         Returns:
-            画像の公開 URL
+            (image_url, delete_url) のタプル
         """
         with open(image_path, "rb") as f:
             image_data = base64.b64encode(f.read()).decode("utf-8")
 
         response = requests.post(
             self.IMGBB_API_URL,
-            data={"key": self.imgbb_api_key, "image": image_data},
+            data={
+                "key":        self.imgbb_api_key,
+                "image":      image_data,
+                "expiration": 600,   # 10分後に自動削除（投稿失敗時のフォールバック）
+            },
             timeout=30,
         )
         response.raise_for_status()
-        return response.json()["data"]["url"]
+        data = response.json()["data"]
+        return data["url"], data["delete_url"]
+
+    def delete_from_imgbb(self, delete_url: str):
+        """
+        imgbb にアップロードした画像を削除する。
+        投稿完了後に呼び出してプライバシーを保護する。
+        削除失敗はエラーとして扱わない（10分後の自動削除に任せる）。
+        """
+        try:
+            requests.get(delete_url, timeout=10)
+            print("[instagram] imgbb の画像を削除しました")
+        except Exception as e:
+            print(f"[instagram] imgbb 削除スキップ（自動削除に任せます）: {e}")
 
     def create_media_container(self, image_url: str, caption: str) -> str:
         """
@@ -146,14 +166,15 @@ class InstagramClient:
 
     def post(self, image_path: str, caption: str) -> str:
         """
-        imgbb アップロード → コンテナ作成 → 処理完了待ち → 公開
+        imgbb アップロード → コンテナ作成 → 処理完了待ち → 公開 → imgbb 削除
         の一連の投稿処理を実行する。
 
         Returns:
             Instagram の投稿 ID
         """
-        image_url    = self.upload_to_imgbb(image_path)
+        image_url, delete_url = self.upload_to_imgbb(image_path)
         container_id = self.create_media_container(image_url, caption)
         self.wait_until_ready(container_id)   # FINISHED を確認してから publish
-        post_id      = self.publish(container_id)
+        post_id = self.publish(container_id)
+        self.delete_from_imgbb(delete_url)    # 投稿完了後に imgbb から画像を削除
         return post_id
