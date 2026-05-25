@@ -5,6 +5,9 @@ on:
     tags:
       - "v*"   # v1.0.0 などのタグを push したときだけ実行
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
