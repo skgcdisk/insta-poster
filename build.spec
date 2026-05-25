@@ -13,11 +13,11 @@
 #   - APScheduler の SQLite jobstore は sqlalchemy に依存するため hiddenimports に追加
 
 import sys
+import sysconfig
 from pathlib import Path
-import site
 
-# site-packages のパスを取得
-site_pkgs = Path(site.getsitepackages()[0])
+# site-packages のパスを取得（ローカル仮想環境・GitHub Actions どちらでも動く）
+site_pkgs = Path(sysconfig.get_path('purelib'))
 
 a = Analysis(
     ['main.py'],
