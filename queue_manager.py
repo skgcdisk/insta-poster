@@ -77,6 +77,10 @@ class QueueManager:
         self.jobs = [j for j in self.jobs if j["id"] != job_id]
         self.save()
 
+    def reload(self):
+        """ディスクから queue.json を再読み込みしてメモリを最新状態にする。"""
+        self.jobs = self._load()
+
     def get_ready_jobs(self) -> list[dict]:
         """処理済み（スケジュール未登録）のジョブを返す。"""
         return [j for j in self.jobs if j["status"] == "ready"]

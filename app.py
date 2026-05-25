@@ -119,9 +119,9 @@ class App(ctk.CTk):
 
         # ステータスバー（画面下部）
         self.status_label = ctk.CTkLabel(
-            self, text="待機中...", font=("", 11), text_color="gray", anchor="w"
+            self, text="待機中...", font=("", 13, "bold"), text_color="#888888", anchor="w"
         )
-        self.status_label.pack(side="bottom", fill="x", padx=16, pady=(0, 8))
+        self.status_label.pack(side="bottom", fill="x", padx=16, pady=(0, 10))
 
     def _build_main_tab(self, parent):
         """メインタブの UI 要素を構築する。"""
@@ -676,6 +676,8 @@ class App(ctk.CTk):
         """バックグラウンドで即時投稿を実行するワーカー。"""
         from post_job import execute_post
         execute_post(job_id)
+        # execute_post はディスクに書き込むため、メモリを再読み込みしてから判定する
+        self.queue_mgr.reload()
         self.after(0, self._refresh_queue_list)
         job = self.queue_mgr.get(job_id)
         if job and job["status"] == "posted":
@@ -710,8 +712,18 @@ class App(ctk.CTk):
                 print(f"[app] 補正済みファイルの削除に失敗: {e}")
 
     def _set_status(self, message: str):
-        """ステータスバーのメッセージを更新する。"""
-        self.status_label.configure(text=message)
+        """ステータスバーのメッセージを更新する。内容に応じて色を変える。"""
+        if message.startswith("❌"):
+            color = "#ff6b6b"   # 赤系
+        elif message.startswith("✅"):
+            color = "#69db7c"   # 緑系
+        elif message.startswith("⚠️"):
+            color = "#ffd43b"   # 黄系
+        elif message.startswith("📤") or message.startswith("⏳"):
+            color = "#74c0fc"   # 青系
+        else:
+            color = "#aaaaaa"   # デフォルト（グレー）
+        self.status_label.configure(text=message, text_color=color)
 
     # ──────────────────────────────────────────
     # ポーリング（スケジュール済みジョブの状態監視）
