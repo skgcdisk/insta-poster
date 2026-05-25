@@ -6,7 +6,7 @@ CONFIG_FILE = "config.json"
 
 class ConfigManager:
     """
-    APIキーや投稿モードなどの設定を config.json で管理するクラス。
+    APIキーなどの設定を config.json で管理するクラス。
     新しいキーが追加されてもデフォルト値とマージするため後方互換性を保てる。
     """
 
@@ -16,12 +16,6 @@ class ConfigManager:
         "instagram_user_id": "",
         "instagram_access_token": "",
         "imgbb_api_key": "",
-        # --- 投稿モード ---
-        # "local"  : Phase1 - このPCのAPSchedulerが直接Instagramに投稿する
-        # "server" : Phase2 - サーバーに画像・キャプション・日時をアップロードし、サーバーが投稿する
-        "posting_mode": "local",
-        "server_url": "",
-        "server_api_key": "",
         # キャプション生成の指示文（空文字のときは GeminiClient のデフォルトを使用）
         # 安全チェックの指示は GeminiClient 内で固定されており、ここでは変更できない。
         "caption_prompt": "",
@@ -50,5 +44,3 @@ class ConfigManager:
     def set(self, key: str, value: str):
         self.config[key] = value
 
-    def is_local_mode(self) -> bool:
-        return self.config.get("posting_mode", "local") == "local"

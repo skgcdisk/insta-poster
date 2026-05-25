@@ -29,10 +29,6 @@ class TestDefaults:
         for key in cm_module.ConfigManager.DEFAULT_CONFIG:
             assert mgr.get(key) is not None  # キーが存在する
 
-    def test_default_posting_mode_is_local(self, tmp_config):
-        mgr = tmp_config()
-        assert mgr.get("posting_mode") == "local"
-
     def test_default_api_keys_are_empty(self, tmp_config):
         mgr = tmp_config()
         assert mgr.get("gemini_api_key") == ""
@@ -81,7 +77,6 @@ class TestBackwardCompatibility:
         # caption_prompt が存在しない古い設定ファイルを模擬する
         old_config = {
             "gemini_api_key": "old_key",
-            "posting_mode": "local",
         }
         with open(cm_module.CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(old_config, f)
@@ -92,26 +87,10 @@ class TestBackwardCompatibility:
 
     def test_existing_values_not_overwritten(self, tmp_config):
         """既存の設定値がデフォルト値で上書きされないこと。"""
-        existing = {"posting_mode": "server", "gemini_api_key": "my_key"}
+        existing = {"gemini_api_key": "my_key", "imgbb_api_key": "imgbb_key"}
         with open(cm_module.CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(existing, f)
 
         mgr = tmp_config()
-        assert mgr.get("posting_mode") == "server"
         assert mgr.get("gemini_api_key") == "my_key"
-
-
-# ──────────────────────────────────────────
-# is_local_mode
-# ──────────────────────────────────────────
-
-class TestIsLocalMode:
-    def test_local_mode(self, tmp_config):
-        mgr = tmp_config()
-        mgr.set("posting_mode", "local")
-        assert mgr.is_local_mode() is True
-
-    def test_server_mode(self, tmp_config):
-        mgr = tmp_config()
-        mgr.set("posting_mode", "server")
-        assert mgr.is_local_mode() is False
+        assert mgr.get("imgbb_api_key") == "imgbb_key"

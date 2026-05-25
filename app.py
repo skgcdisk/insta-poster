@@ -204,22 +204,6 @@ class App(ctk.CTk):
     def _build_settings_tab(self, parent):
         """設定タブの UI 要素を構築する。"""
 
-        # ── 投稿モード選択 ──
-        mode_row = ctk.CTkFrame(parent, fg_color="transparent")
-        mode_row.pack(fill="x", pady=(8, 16))
-        ctk.CTkLabel(mode_row, text="投稿モード", font=("", 12, "bold")).pack(side="left")
-        self.mode_var = ctk.StringVar(value=self.config_mgr.get("posting_mode", "local"))
-        ctk.CTkRadioButton(
-            mode_row, text="ローカル（このPC）",
-            variable=self.mode_var, value="local",
-            command=self._on_mode_change,
-        ).pack(side="left", padx=20)
-        ctk.CTkRadioButton(
-            mode_row, text="サーバー経由（Phase2）",
-            variable=self.mode_var, value="server",
-            command=self._on_mode_change,
-        ).pack(side="left")
-
         # ── 各 API キー入力欄 ──
         # (config_key, ラベル, プレースホルダー, ヒント, マスク)
         fields = [
@@ -235,16 +219,6 @@ class App(ctk.CTk):
 
         for key, label, placeholder, hint, masked in fields:
             self._add_field(scroll, key, label, placeholder, hint, masked)
-
-        # ── サーバー設定（server モード時のみ表示） ──
-        self.server_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        for key, label, placeholder, hint, masked in [
-            ("server_url",     "サーバー URL",     "https://your-server.com", "", False),
-            ("server_api_key", "サーバー API キー", "",                        "", True),
-        ]:
-            self._add_field(self.server_frame, key, label, placeholder, hint, masked)
-
-        self._on_mode_change()  # 初期表示切替
 
         # ── キャプション生成プロンプト編集 ──
         prompt_frame = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -308,13 +282,6 @@ class App(ctk.CTk):
     # ──────────────────────────────────────────
     # イベントハンドラ
     # ──────────────────────────────────────────
-
-    def _on_mode_change(self):
-        """投稿モードが切り替わったときにサーバー設定欄の表示/非表示を切り替える。"""
-        if self.mode_var.get() == "server":
-            self.server_frame.pack(fill="x")
-        else:
-            self.server_frame.pack_forget()
 
     def _on_drop(self, event):
         """
@@ -468,8 +435,7 @@ class App(ctk.CTk):
         """設定タブの内容を保存し、クライアントを再初期化する。"""
         for key, entry in self.entries.items():
             self.config_mgr.set(key, entry.get().strip())
-        self.config_mgr.set("posting_mode", self.mode_var.get())
-        prompt = self.prompt_textbox.get("0.0", "end").strip()
+prompt = self.prompt_textbox.get("0.0", "end").strip()
         self.config_mgr.set("caption_prompt", prompt)
         self.config_mgr.save()
         self._init_clients()
