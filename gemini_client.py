@@ -84,7 +84,11 @@ class GeminiClient:
         ng_reason = ""
         caption = ""
 
-        for line in text.splitlines():
+        # CAPTION: 以降は複数行にまたがる場合があるため、
+        # CAPTION: 行を見つけたらそれ以降の全行をキャプションとして結合する。
+        lines = text.splitlines()
+        caption_start = None
+        for i, line in enumerate(lines):
             line = line.strip()
             if line.startswith("SAFETY:"):
                 safety_val = line[len("SAFETY:"):].strip()
@@ -93,8 +97,17 @@ class GeminiClient:
                     ng_reason = safety_val.split(":", 1)[-1].strip() if ":" in safety_val else safety_val
             elif line.startswith("CAPTION:"):
                 caption_val = line[len("CAPTION:"):].strip()
-                if caption_val != "なし":
+                if caption_val == "なし":
+                    caption_start = None
+                else:
+                    caption_start = i
                     caption = caption_val
+
+        # CAPTION: 行以降に続きがあれば結合する
+        if caption_start is not None and caption_start + 1 < len(lines):
+            rest = "\n".join(l.strip() for l in lines[caption_start + 1:]).strip()
+            if rest:
+                caption = (caption + "\n" + rest).strip()
 
         return is_safe, ng_reason, caption
 

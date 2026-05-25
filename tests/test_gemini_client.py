@@ -79,6 +79,14 @@ class TestAnalyzeImageParsing:
         assert ng_reason == ""
         assert caption == "素敵な写真です🌸 #写真 #日常"
 
+    def test_multiline_caption(self, client):
+        """CAPTION: 以降が複数行にまたがる場合も全行取得できること。"""
+        text = "SAFETY: OK\nCAPTION: 素敵な写真です🌸\n#写真 #日常 #風景"
+        _, _, caption = self._call(client, text)
+        assert "素敵な写真です🌸" in caption
+        assert "#写真" in caption
+        assert "#風景" in caption
+
     def test_ng_response(self, client):
         text = "SAFETY: NG:暴力的な内容\nCAPTION: なし"
         is_safe, ng_reason, caption = self._call(client, text)
