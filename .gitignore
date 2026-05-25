@@ -44,3 +44,6 @@ build/
 
 # 間違えてideaで開いたとき
 .idea/
+
+# UIモックアップ（開発用）
+ui_mockup.html
