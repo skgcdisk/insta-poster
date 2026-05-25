@@ -435,7 +435,7 @@ class App(ctk.CTk):
         """設定タブの内容を保存し、クライアントを再初期化する。"""
         for key, entry in self.entries.items():
             self.config_mgr.set(key, entry.get().strip())
-prompt = self.prompt_textbox.get("0.0", "end").strip()
+        prompt = self.prompt_textbox.get("0.0", "end").strip()
         self.config_mgr.set("caption_prompt", prompt)
         self.config_mgr.save()
         self._init_clients()
