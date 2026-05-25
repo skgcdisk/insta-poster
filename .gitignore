@@ -47,3 +47,6 @@ build/
 
 # UIモックアップ（開発用）
 ui_mockup.html
+
+# Inno Setup インストーラースクリプト（配布ビルド時のみ使用）
+installer.iss
