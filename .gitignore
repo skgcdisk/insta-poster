@@ -14,6 +14,7 @@ env/
 
 # VSCode
 .vscode/
+*.code-workspace
 
 # APIキー・設定ファイル（絶対にコミットしない）
 config.json
